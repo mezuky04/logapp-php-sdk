@@ -15,9 +15,18 @@ class LogApp {
     private static $_apiKey = 'abc';
 
     /**
+     * @var bool Indicate what mode to be used. Fast mode don't wait for response, just make the request
+     */
+
+    /**
+     * Fast mode enabled
+     */
+    const FAST_MODE = true;
+
+    /**
      * API endpoint
      */
-    private static $_apiEndpoint = 'http://logapp-dev.co/loggerAPI/log';
+    private static $_apiEndpoint = 'http://localhost/logapp/public/loggerAPI/log';//'http://logapp-dev.co/loggerAPI/log';
 
     /**
      * Logger constants
@@ -53,23 +62,27 @@ class LogApp {
      *
      * @param string $message To log
      * @param string $logLevel Can be 'info', 'debug', 'warning', 'error' or 'emergency'
+     * @param bool $fastMode Indicate if fast mode should be used
      */
-    public static function log($message, $logLevel = self::LOG_LEVEL_WARNING) {
+    public static function log($message, $logLevel = self::LOG_LEVEL_WARNING, $fastMode = self::FAST_MODE) {
 
         // Check if curl is enabled
         self::_curlEnabled();
 
+        $backtrace = debug_backtrace();
+        $caller = array_shift($backtrace);
+
         $fields = array(
             self::FIELD_API_KEY => self::$_apiKey,
             self::FIELD_MESSAGE => $message,
-            self::FIELD_LOG_FILE => self::_getLogFile(),
-            self::FIELD_LOG_LINE => self::_getLogLine(),
+            self::FIELD_LOG_FILE => $caller['file'],//self::_getLogFile(),
+            self::FIELD_LOG_LINE => $caller['line'],//self::_getLogLine(),
             self::FIELD_LOG_LEVEL => $logLevel
         );
-
+        
         // Make api request
-        $response = self::_doRequest($fields);
-
+        $response = self::_doRequest($fields, $fastMode);
+       	
         // Process response errors
         self::_processResponseErrors($response);
     }
@@ -79,10 +92,11 @@ class LogApp {
      * Make api request
      *
      * @param array $fields
+     * @param bool $fastMode
      * @return array
      * @throws Exception
      */
-    private function _doRequest($fields = array()) {
+    private function _doRequest($fields = array(), $fastMode) {
 
         // Initialize curl
         $ch = curl_init();
@@ -91,11 +105,18 @@ class LogApp {
         curl_setopt($ch, CURLOPT_POSTFIELDS, $fields);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 
+        if ($fastMode) {
+            curl_setopt($ch, CURLOPT_TIMEOUT_MS, 18);
+        }
+
         // Make request
         $result = curl_exec($ch);
 
-        // Check for errors
-        if (curl_error($ch)) {
+        // Check for errors (except timeout that will appear if fast mode is on)
+        if (curl_error($ch) && !$fastMode) {
+            throw new Exception("LogApp curl error: ".curl_error($ch));
+        }
+        if (curl_error($ch) && $fastMode && curl_errno($ch) !== 28) {
             throw new Exception("LogApp curl error: ".curl_error($ch));
         }
 
@@ -116,32 +137,6 @@ class LogApp {
         if ($response[self::RESPONSE_KEY_STATUS] == self::RESPONSE_VALUE_FAILURE) {
             throw new Exception("LogApp returned error code ".$response[self::RESPONSE_KEY_ERROR_CODE]." with the following message: ".$response[self::RESPONSE_KEY_ERROR_MESSAGE]);
         }
-    }
-
-
-    /**
-     * Get log file path
-     *
-     * @return string Log file path
-     */
-    private function _getLogFile() {
-        $backtrace = debug_backtrace();
-        $caller = array_shift($backtrace);
-
-        return $caller['file'];
-    }
-
-
-    /**
-     * Get log line
-     *
-     * @return int Log line
-     */
-    private function _getLogLine() {
-        $backtrace = debug_backtrace();
-        $caller = array_shift($backtrace);
-
-        return $caller['line'];
     }
 
 
